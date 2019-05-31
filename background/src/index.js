@@ -4,7 +4,8 @@ let currState = {
   clicks: 0
 };
 
-const app = Elm.Elm.Main.init({flags : currState});
+const app = Elm.Elm.Main.init({ flags: currState });
+
 
 // the currently connected ports
 const listeners = new Set()

@@ -1,10 +1,7 @@
 # elm-chrome-extension
 
-This experimental project demonstrates a Chrome extension composed of
-three Elm applications that communicate through Chrome's
+Chrome extension composed of three Elm applications that communicate through Chrome's
 message passing.
-
-![screenshot](https://i.imgur.com/Y8Z0Wwn.png)
 
 The three apps:
 
@@ -20,28 +17,16 @@ actions in the background app.
 Every time the background app model updates, it broadcasts to all
 listeners which replace their model with the new version.
 
-## The Demo
-
-This demo syncs up a simple model that tracks global mouse clicks:
-
-``` elm
-type alias Model =
-    { clicks : Int }
-```
-
-A click in any tab and a click in the popup app will update the
-model for all tabs/popup apps.
-
 ## Development
 
-Git clone and then `npm install`.
+Git clone and then `yarn`.
 
 Build the extension into the `dist/` folder:
 
-    npm run build
+    yarn build
 
 Build to `dist/` and rebuild on file changes:
 
-    npm run watch
+    yarn dev
 
 Once built, load the `dist/` folder as an extension in Chrome's UI.

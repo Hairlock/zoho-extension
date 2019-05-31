@@ -18,8 +18,18 @@ module.exports = {
       {
         test: /\.elm$/,
         exclude: [/elm-stuff/, /node_modules/],
-        use: ['elm-hot-webpack-loader', 'elm-webpack-loader?verbose=true'],
-      }      
+        use: [
+          { loader: 'elm-hot-webpack-loader' },
+          {
+            loader: 'elm-webpack-loader',
+            options: {
+              cwd: __dirname,
+              debug: true,
+              verbose: true
+            }
+          }
+        ]
+      }
     ],
   },
 }

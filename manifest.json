@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "permissions": [],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": [
+      "background.js"
+    ],
     "persistent": true
   },
   "browser_action": {
@@ -13,9 +15,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*/*"],
-      "css": ["content.css"],
-      "js": ["content.js"]
+      "matches": [
+        "https://inventory.zoho.eu/*"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "js": [
+        "content.js"
+      ]
     }
   ]
 }

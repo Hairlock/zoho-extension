@@ -1,0 +1,113 @@
+
+$primary-color: #008cba;
+$gray-color: #ddd;
+$medium-up: 600px;
+$large-up: 1000px;
+$global-radius: 4px;
+
+@mixin heading-font-regular {
+	font-family: 'Helvetica', 'Helvetica Neue', 'Arial', sans-serif;;
+}
+
+.product {
+  margin-top: 400px !important;
+}
+
+.content {
+	text-align: center;
+	position: absolute;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
+
+	h1, h2, h3, h4 {
+		margin: 0;
+	}
+
+	> .header {
+		display: flex;
+
+		> div {
+			margin: 10px;
+		}
+	}
+
+	> .main {
+		display: flex;
+
+		> .invoice-wrapper {
+			display: flex;
+			flex-wrap: wrap;
+			overflow-y: scroll;
+			height: 350px;
+			width: 60%;
+	
+			> div {
+				padding: 10px;
+				min-width: 500px;
+			}
+		}
+
+		> .order-builder {
+			width: 40%;
+		}
+
+	}
+
+	table {
+		border-collapse: collapse;
+		width: 100%;
+		float: left;
+		margin: 0 0 2em;
+
+		thead {
+			border-bottom: 3px solid $primary-color;
+			th {
+				padding: 0.35em 0 .35em;
+			font-weight: 400;
+				text-align: center;
+				@include heading-font-regular;
+				font-size: 1.25em;
+			}
+			
+		}
+
+		tbody {
+			border-bottom: 3px solid $primary-color;
+			tr {
+				border-bottom: 2px solid #ddd;
+
+				&.line-item {
+					cursor: pointer;
+				}
+			
+				td {
+					padding: .75em 0;
+
+					a {
+						color: $primary-color;
+						text-decoration: none;
+						display: inline-block;
+						margin: 0 .5em 0 0;
+						&:hover, &:active, &:focus {
+							color: darken($primary-color, 10%);
+							border: none;
+						}
+					}
+				}
+			}
+		}
+
+		tfoot {
+			td {
+				padding: 0.35em 0 .35em;
+
+				text-align: left;
+				@include heading-font-regular;
+				font-size: 1.25em;
+			}
+		}
+	}
+}
+
