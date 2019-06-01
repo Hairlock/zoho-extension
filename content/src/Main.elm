@@ -3,7 +3,7 @@ port module Main exposing (Msg(..), init, main, subscriptions, update, view)
 import Browser
 import Debug
 import Html exposing (Html, button, div, h1, h2, h3, h4, i, input, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, placeholder, value)
+import Html.Attributes exposing (class, colspan, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http as Http
 import Json.Decode as Decode exposing (Decoder)
@@ -80,23 +80,7 @@ productSelectConfig =
         , toLabel = .name
         , filter = filter 3 .name
         }
-        |> Select.withCutoff 8
-        |> Select.withInputClass "border border-grey-darker"
-        |> Select.withInputId "input-id"
-        |> Select.withInputWrapperStyles
-            [ ( "padding", "0.4rem" ) ]
-        |> Select.withItemClass " p-2 border-b border-grey text-grey-darker"
-        |> Select.withItemStyles [ ( "font-size", "1rem" ) ]
-        |> Select.withMenuClass "border border-grey-dark"
-        |> Select.withMenuStyles [ ( "background", "white" ) ]
-        |> Select.withNotFound "No matches"
-        |> Select.withNotFoundClass "text-red"
-        |> Select.withNotFoundStyles [ ( "padding", "0 2rem" ) ]
-        |> Select.withHighlightedItemClass "bg-grey-lighter"
-        |> Select.withHighlightedItemStyles [ ( "color", "black" ) ]
-        |> Select.withPrompt "Select a movie"
-        |> Select.withPromptClass "text-grey-darker"
-        |> Select.withUnderlineClass "underline"
+        |> Select.withPrompt "Select a product"
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -317,7 +301,7 @@ orderTable model (OrderTableContent orders) =
             (orderRows
                 ++ [ Html.map ProductSelectMsg <|
                         tr [ class "line-item" ]
-                            [ td [ class "autocompleter" ]
+                            [ td [ class "autocompleter", colspan 5 ]
                                 [ Select.view
                                     productSelectConfig
                                     model.productSelect

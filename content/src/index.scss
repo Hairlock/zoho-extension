@@ -9,8 +9,12 @@ $global-radius: 4px;
 	font-family: 'Helvetica', 'Helvetica Neue', 'Arial', sans-serif;;
 }
 
+html {
+	font-size: 20px!important;
+}
+
 .product {
-  margin-top: 400px !important;
+  margin-top: 45vh !important;
 }
 
 .content {
@@ -40,7 +44,7 @@ $global-radius: 4px;
 			display: flex;
 			flex-wrap: wrap;
 			overflow-y: scroll;
-			height: 350px;
+			height: 40vh;
 			width: 60%;
 	
 			> div {
@@ -51,6 +55,8 @@ $global-radius: 4px;
 
 		> .order-builder {
 			width: 40%;
+			height: 40vh;
+			overflow-y: scroll;
 		}
 
 	}
