@@ -9,6 +9,8 @@ import Http as Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Pipeline as D exposing (hardcoded, optional, required)
 import RemoteData as RemoteData exposing (..)
+import Select
+import Simple.Fuzzy
 
 
 
@@ -31,7 +33,16 @@ type alias Model =
     , searchTerm : String
     , invoices : WebData InvoiceListResponse
     , invoiceDetails : Maybe (List InvoiceDetail)
-    , orders : List InvoiceLineItem
+    , orders : List Order
+    , products : WebData ProductListResponse
+    , productSelect : Select.State
+    , selectedProducts : List Product
+    }
+
+
+type alias Order =
+    { product : Product
+    , quantity : Float
     }
 
 
@@ -42,8 +53,11 @@ init token =
       , invoices = NotAsked
       , invoiceDetails = Nothing
       , orders = []
+      , products = NotAsked
+      , productSelect = Select.newState ""
+      , selectedProducts = []
       }
-    , Cmd.none
+    , fetchProducts token
     )
 
 
@@ -52,8 +66,37 @@ type Msg
     | LoadInvoices
     | InvoicesLoaded (WebData InvoiceListResponse)
     | InvoiceDetailsReceived (Result Decode.Error (List InvoiceDetail))
-    | AddOrder InvoiceLineItem
+    | ProductsLoaded (WebData ProductListResponse)
+    | AddOrder String Float
     | RemoveOrder String
+    | OnProductSelect (Maybe Product)
+    | ProductSelectMsg (Select.Msg Product)
+
+
+productSelectConfig : Select.Config Msg Product
+productSelectConfig =
+    Select.newConfig
+        { onSelect = OnProductSelect
+        , toLabel = .name
+        , filter = filter 3 .name
+        }
+        |> Select.withCutoff 8
+        |> Select.withInputClass "border border-grey-darker"
+        |> Select.withInputId "input-id"
+        |> Select.withInputWrapperStyles
+            [ ( "padding", "0.4rem" ) ]
+        |> Select.withItemClass " p-2 border-b border-grey text-grey-darker"
+        |> Select.withItemStyles [ ( "font-size", "1rem" ) ]
+        |> Select.withMenuClass "border border-grey-dark"
+        |> Select.withMenuStyles [ ( "background", "white" ) ]
+        |> Select.withNotFound "No matches"
+        |> Select.withNotFoundClass "text-red"
+        |> Select.withNotFoundStyles [ ( "padding", "0 2rem" ) ]
+        |> Select.withHighlightedItemClass "bg-grey-lighter"
+        |> Select.withHighlightedItemStyles [ ( "color", "black" ) ]
+        |> Select.withPrompt "Select a movie"
+        |> Select.withPromptClass "text-grey-darker"
+        |> Select.withUnderlineClass "underline"
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -85,19 +128,64 @@ update msg model =
         InvoiceDetailsReceived results ->
             ( { model | invoiceDetails = Result.toMaybe results }, Cmd.none )
 
-        AddOrder lineItem ->
-            let
-                orders =
-                    if List.any (\o -> o.id == lineItem.id) model.orders then
-                        model.orders
+        ProductsLoaded products ->
+            ( { model | products = products }, Cmd.none )
 
-                    else
-                        lineItem :: model.orders
+        AddOrder productName quantity ->
+            let
+                maybeOrder =
+                    case model.products of
+                        Success data ->
+                            List.filter (\p -> p.name == productName) data.results
+                                |> List.head
+                                |> Maybe.map
+                                    (\p ->
+                                        Order p quantity
+                                     -- { lineItem | itemtotal = lineItem.quantity * p.price }
+                                    )
+
+                        _ ->
+                            Nothing
+
+                orders =
+                    case
+                        ( model.orders
+                            |> List.any (\o -> o.product.name == productName)
+                            |> not
+                        , maybeOrder
+                        )
+                    of
+                        ( True, Just o ) ->
+                            o :: model.orders
+
+                        _ ->
+                            model.orders
             in
             ( { model | orders = orders }, Cmd.none )
 
-        RemoveOrder id ->
-            ( { model | orders = List.filter (\o -> o.id /= id) model.orders }, Cmd.none )
+        RemoveOrder name ->
+            ( { model | orders = List.filter (\o -> o.product.name /= name) model.orders }, Cmd.none )
+
+        ProductSelectMsg subMsg ->
+            let
+                ( updated, cmd ) =
+                    Select.update productSelectConfig subMsg model.productSelect
+            in
+            ( { model | productSelect = updated }, cmd )
+
+        OnProductSelect maybeProduct ->
+            let
+                selectedProducts =
+                    case maybeProduct of
+                        Just product ->
+                            -- product :: model.selectedProducts
+                            model.orders ++ [ Order product 1 ]
+
+                        Nothing ->
+                            -- model.selectedProducts
+                            model.orders
+            in
+            ( { model | orders = selectedProducts }, Cmd.none )
 
 
 view : Model -> Html Msg
@@ -114,10 +202,6 @@ view model =
             ]
         , case model.invoiceDetails of
             Just invoiceDetails ->
-                let
-                    total =
-                        List.foldl (\o acc -> o.itemtotal + acc) 0 model.orders
-                in
                 div [ class "main" ]
                     [ div [ class "invoice-wrapper" ]
                         (List.map invoiceItem invoiceDetails)
@@ -125,7 +209,7 @@ view model =
                         ([ h3 [] [ text "Order Builder" ]
                          ]
                             |> pushIf (List.length model.orders > 0)
-                                (lineItemTable total model.orders Order)
+                                (orderTable model <| OrderTableContent model.orders)
                         )
                     ]
 
@@ -134,58 +218,35 @@ view model =
         ]
 
 
-pushIf : Bool -> a -> List a -> List a
-pushIf pred thing list =
-    if pred then
-        list ++ [ thing ]
-
-    else
-        list
-
-
-orderItems : List InvoiceLineItem -> Html Msg
-orderItems items =
-    table []
-        [ thead []
-            [ tr []
-                [ th [] [ text "Product" ]
-                ]
-            ]
-        ]
-
-
 invoiceItem : InvoiceDetail -> Html Msg
 invoiceItem { lineitems, total } =
     div []
-        [ lineItemTable total lineitems Invoice
+        [ invoiceTable (InvoiceTableContent total lineitems)
         ]
 
 
-type ItemTable
-    = Invoice
-    | Order
+type alias InvoiceTotal =
+    Float
 
 
-lineItemTable : Float -> List InvoiceLineItem -> ItemTable -> Html Msg
-lineItemTable total lineItems tableType =
+type InvoiceTable
+    = InvoiceTableContent InvoiceTotal (List InvoiceLineItem)
+
+
+type OrderTable
+    = OrderTableContent (List Order)
+
+
+invoiceTable : InvoiceTable -> Html Msg
+invoiceTable (InvoiceTableContent total items) =
     let
-        lineItemRow lineItem =
-            let
-                { id, name, quantity, itemtotal } =
-                    lineItem
-            in
+        lineItemRow { name, quantity, itemtotal } =
             tr [ class "line-item" ]
                 [ td [] [ text name ]
                 , td [] [ text <| String.fromFloat quantity ]
                 , td [] [ text <| String.fromFloat itemtotal ]
-                , case tableType of
-                    Order ->
-                        td [ onClick (RemoveOrder id) ]
-                            [ i [ class "fas fa-times-circle" ] [] ]
-
-                    Invoice ->
-                        td [ onClick (AddOrder lineItem) ]
-                            [ i [ class "fas fa-plus" ] [] ]
+                , td [ onClick (AddOrder name quantity) ]
+                    [ i [ class "fas fa-plus" ] [] ]
                 ]
     in
     table []
@@ -196,11 +257,76 @@ lineItemTable total lineItems tableType =
                 , th []
                     [ text <| "Total: " ++ String.fromFloat total
                     ]
-                , th [] [ text "Controls" ]
+                , th [] [ text "Add" ]
                 ]
             ]
-        , tbody []
-            (List.map lineItemRow lineItems)
+        , tbody [ class "--invoices" ]
+            (List.map lineItemRow items)
+        ]
+
+
+orderTable : Model -> OrderTable -> Html Msg
+orderTable model (OrderTableContent orders) =
+    let
+        total =
+            List.foldl (\o acc -> o.product.price + acc) 0 orders
+
+        lineItemRow { name, quantity, itemtotal, unit } =
+            tr [ class "line-item" ]
+                [ td [] [ text name ]
+                , td [] [ text <| String.fromFloat quantity ]
+                , td [] [ text <| String.fromFloat itemtotal ]
+                , td [] [ text unit ]
+                , td [ onClick (RemoveOrder name) ]
+                    [ i [ class "fas fa-times-circle" ] [] ]
+                ]
+
+        orderRows =
+            List.map
+                (\{ product, quantity } ->
+                    lineItemRow
+                        { name = product.name
+                        , quantity = quantity
+                        , itemtotal = product.price
+                        , unit = product.unit
+                        }
+                )
+                orders
+
+        extractedProducts =
+            case model.products of
+                Success data ->
+                    data.results
+
+                _ ->
+                    []
+    in
+    table []
+        [ thead []
+            [ tr []
+                [ th [] [ text <| "Product" ]
+                , th [] [ text "Quantity" ]
+                , th []
+                    [ text <| "Total: " ++ String.fromFloat total
+                    ]
+                , th [] [ text "Unit" ]
+                , th [] [ text "Remove" ]
+                ]
+            ]
+        , tbody [ class "--orders" ]
+            (orderRows
+                ++ [ Html.map ProductSelectMsg <|
+                        tr [ class "line-item" ]
+                            [ td [ class "autocompleter" ]
+                                [ Select.view
+                                    productSelectConfig
+                                    model.productSelect
+                                    extractedProducts
+                                    model.selectedProducts
+                                ]
+                            ]
+                   ]
+            )
         ]
 
 
@@ -219,16 +345,8 @@ main =
 
 
 
--- Api
-
-
-apiUrl : String -> String
-apiUrl endpoint =
-    "https://inventory.zoho.eu/api/v1/" ++ endpoint ++ "?organization_id=20062851724"
-
-
-
--- Invoices
+-- Data Models
+-- Invoice List Item
 
 
 type alias InvoiceListItem =
@@ -246,6 +364,10 @@ invoiceListItemDecoder =
         |> D.required "date" Decode.string
 
 
+
+-- Invoice List Response
+
+
 type alias InvoiceListResponse =
     { invoices : List InvoiceListItem }
 
@@ -254,6 +376,10 @@ invoiceListResponseDecoder : Decoder InvoiceListResponse
 invoiceListResponseDecoder =
     Decode.succeed InvoiceListResponse
         |> D.required "invoices" (Decode.list invoiceListItemDecoder)
+
+
+
+-- Invoice Line Item
 
 
 type alias InvoiceLineItem =
@@ -273,6 +399,10 @@ invoiceLineItemDecoder =
         |> D.required "item_total" Decode.float
 
 
+
+-- Invoice Detail
+
+
 type alias InvoiceDetail =
     { id : String
     , lineitems : List InvoiceLineItem
@@ -290,6 +420,10 @@ invoiceDetailDecoder =
         |> D.required "total" Decode.float
 
 
+
+-- Invoice Detail Response
+
+
 type alias InvoiceDetailResponse =
     { invoice : InvoiceDetail }
 
@@ -298,6 +432,51 @@ invoiceDetailsResponseDecoder : Decode.Value -> Result Decode.Error (List Invoic
 invoiceDetailsResponseDecoder =
     Decode.decodeValue
         (Decode.field "invoices" (Decode.list invoiceDetailDecoder))
+
+
+
+-- Product
+
+
+type alias Product =
+    { id : String
+    , name : String
+    , price : Float
+    , unit : String
+    }
+
+
+productDecoder : Decoder Product
+productDecoder =
+    Decode.succeed Product
+        |> D.required "id" Decode.string
+        |> D.required "text" Decode.string
+        |> D.required "rate" Decode.float
+        |> D.required "unit" Decode.string
+
+
+
+-- Product List Response
+
+
+type alias ProductListResponse =
+    { results : List Product
+    }
+
+
+productListResponseDecoder : Decoder ProductListResponse
+productListResponseDecoder =
+    Decode.succeed ProductListResponse
+        |> D.required "results" (Decode.list productDecoder)
+
+
+
+-- API
+
+
+apiUrl : String -> String
+apiUrl endpoint =
+    "https://inventory.zoho.eu/api/v1/" ++ endpoint ++ "?organization_id=20062851724"
 
 
 getInvoicesForCompany : Model -> Cmd Msg
@@ -315,3 +494,42 @@ getInvoicesForCompany { token, searchTerm } =
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+fetchProducts : String -> Cmd Msg
+fetchProducts token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "X-ZCSRF-TOKEN" token ]
+        , url =
+            apiUrl "autocomplete/product"
+                ++ "&search_text=&item_type=sales"
+        , body = Http.emptyBody
+        , expect = Http.expectJson (RemoteData.fromResult >> ProductsLoaded) productListResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- Util Functions
+
+
+filter : Int -> (a -> String) -> String -> List a -> Maybe (List a)
+filter minChars toLabel query items =
+    if String.length query < minChars then
+        Nothing
+
+    else
+        items
+            |> Simple.Fuzzy.filter toLabel query
+            |> Just
+
+
+pushIf : Bool -> a -> List a -> List a
+pushIf pred thing list =
+    if pred then
+        list ++ [ thing ]
+
+    else
+        list

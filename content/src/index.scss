@@ -75,11 +75,32 @@ $global-radius: 4px;
 
 		tbody {
 			border-bottom: 3px solid $primary-color;
+
+			&.--orders {
+				border-bottom: none;
+			}
+
 			tr {
 				border-bottom: 2px solid #ddd;
 
 				&.line-item {
-					cursor: pointer;
+					> td:last-child {
+						cursor: pointer;						
+					}
+
+					> .autocompleter {
+
+						.input-select {
+							font-size: 1.6rem;
+							padding: 0.2rem;
+						}
+
+						.elm-select-menu {
+							margin-top: 0.6em;
+						}
+
+						
+					}
 				}
 			
 				td {
