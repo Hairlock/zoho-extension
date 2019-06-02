@@ -1,6 +1,8 @@
 port module Main exposing (Msg(..), init, main, subscriptions, update, view)
 
 import Browser
+import Date exposing (Date)
+import DatePicker exposing (DateEvent(..), defaultSettings)
 import Debug
 import Html exposing (Html, button, div, h1, h2, h3, h4, i, input, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, colspan, id, placeholder, value)
@@ -37,6 +39,11 @@ type alias Model =
     , products : WebData ProductListResponse
     , productSelect : Select.State
     , selectedProducts : List Product
+    , salesOrder : Maybe SalesOrder
+    , orderDate : Maybe Date
+    , orderDatePicker : DatePicker.DatePicker
+    , deliveryDate : Maybe Date
+    , deliveryDatePicker : DatePicker.DatePicker
     }
 
 
@@ -46,8 +53,65 @@ type alias Order =
     }
 
 
+type alias SaleCustomField =
+    { label : String
+    , value : String
+    }
+
+
+type alias SaleLineItem =
+    { itemOrder : Int
+    , itemId : String
+    , rate : Float
+    , name : String
+    , quantity : Float
+    , discount : Float
+    , taxId : String
+    , unit : String
+    , customFields : List SaleCustomField
+    }
+
+
+type alias SalesOrder =
+    { customerid : String
+    , customerName : String
+    }
+
+
+
+-- Configs
+
+
+productSelectConfig : Select.Config Msg Product
+productSelectConfig =
+    Select.newConfig
+        { onSelect = OnProductSelect
+        , toLabel = .name
+        , filter = filter 3 .name
+        }
+        |> Select.withPrompt "Select a product"
+
+
+orderPickerSettings : DatePicker.Settings
+orderPickerSettings =
+    { defaultSettings | placeholder = "Order Date" }
+
+
+deliveryPickerSettings : DatePicker.Settings
+deliveryPickerSettings =
+    { defaultSettings | placeholder = "Delivery Date" }
+
+
+
+-- Init
+
+
 init : String -> ( Model, Cmd Msg )
 init token =
+    let
+        ( orderPicker, orderPickerCmd ) =
+            DatePicker.init
+    in
     ( { token = token
       , searchTerm = "Leroy"
       , invoices = NotAsked
@@ -56,9 +120,22 @@ init token =
       , products = NotAsked
       , productSelect = Select.newState ""
       , selectedProducts = []
+      , salesOrder = Nothing
+      , orderDate = Nothing
+      , orderDatePicker = orderPicker
+      , deliveryDate = Nothing
+      , deliveryDatePicker = orderPicker
       }
-    , fetchProducts token
+    , Cmd.batch
+        [ fetchProducts token
+        , Cmd.map ToOrderDatePicker orderPickerCmd
+        , Cmd.map ToDeliveryDatePicker orderPickerCmd
+        ]
     )
+
+
+
+-- Msg
 
 
 type Msg
@@ -71,16 +148,8 @@ type Msg
     | RemoveOrder String
     | OnProductSelect (Maybe Product)
     | ProductSelectMsg (Select.Msg Product)
-
-
-productSelectConfig : Select.Config Msg Product
-productSelectConfig =
-    Select.newConfig
-        { onSelect = OnProductSelect
-        , toLabel = .name
-        , filter = filter 3 .name
-        }
-        |> Select.withPrompt "Select a product"
+    | ToOrderDatePicker DatePicker.Msg
+    | ToDeliveryDatePicker DatePicker.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -94,20 +163,30 @@ update msg model =
 
         InvoicesLoaded invoices ->
             let
-                fetchCmd =
+                ( fetchCmd, salesOrder ) =
                     case invoices of
                         Success data ->
                             if List.length data.invoices > 0 then
-                                List.map .id data.invoices
+                                ( List.map .id data.invoices
                                     |> fetchInvoiceDetails
+                                , data.invoices
+                                    |> List.head
+                                    |> Maybe.map (\c -> ( c.customerId, c.customerName ))
+                                    |> Maybe.andThen (\( id, name ) -> Just <| SalesOrder id name)
+                                )
 
                             else
-                                Cmd.none
+                                ( Cmd.none, Nothing )
 
                         _ ->
-                            Cmd.none
+                            ( Cmd.none, Nothing )
             in
-            ( { model | invoices = invoices }, fetchCmd )
+            ( { model
+                | invoices = invoices
+                , salesOrder = salesOrder
+              }
+            , fetchCmd
+            )
 
         InvoiceDetailsReceived results ->
             ( { model | invoiceDetails = Result.toMaybe results }, Cmd.none )
@@ -125,7 +204,6 @@ update msg model =
                                 |> Maybe.map
                                     (\p ->
                                         Order p quantity
-                                     -- { lineItem | itemtotal = lineItem.quantity * p.price }
                                     )
 
                         _ ->
@@ -162,14 +240,52 @@ update msg model =
                 selectedProducts =
                     case maybeProduct of
                         Just product ->
-                            -- product :: model.selectedProducts
                             model.orders ++ [ Order product 1 ]
 
                         Nothing ->
-                            -- model.selectedProducts
                             model.orders
             in
             ( { model | orders = selectedProducts }, Cmd.none )
+
+        ToOrderDatePicker subMsg ->
+            let
+                ( updatedPicker, pickerCmd ) =
+                    DatePicker.update orderPickerSettings subMsg model.orderDatePicker
+
+                selectedDate =
+                    case pickerCmd of
+                        Picked pickedDate ->
+                            Just pickedDate
+
+                        _ ->
+                            model.orderDate
+            in
+            ( { model
+                | orderDate = selectedDate
+                , orderDatePicker = updatedPicker
+              }
+            , Cmd.none
+            )
+
+        ToDeliveryDatePicker subMsg ->
+            let
+                ( updatedPicker, pickerCmd ) =
+                    DatePicker.update deliveryPickerSettings subMsg model.deliveryDatePicker
+
+                selectedDate =
+                    case pickerCmd of
+                        Picked pickedDate ->
+                            Just pickedDate
+
+                        _ ->
+                            model.orderDate
+            in
+            ( { model
+                | deliveryDate = selectedDate
+                , deliveryDatePicker = updatedPicker
+              }
+            , Cmd.none
+            )
 
 
 view : Model -> Html Msg
@@ -185,13 +301,25 @@ view model =
                 , button [ onClick LoadInvoices ] [ text "Search" ]
                 ]
             ]
-        , case model.invoiceDetails of
-            Just invoiceDetails ->
+        , case ( model.invoiceDetails, model.salesOrder ) of
+            ( Just invoiceDetails, Just salesOrder ) ->
                 div [ class "main" ]
                     [ div [ class "invoice-wrapper" ]
                         (List.map invoiceItem invoiceDetails)
                     , div [ class "order-builder" ]
-                        ([ h3 [] [ text "Order Builder" ]
+                        ([ h3 [] [ text <| "Order Builder - " ++ salesOrder.customerName ]
+                         , div [ class "date-pickers" ]
+                            [ div []
+                                [ h4 [] [ text "Order Date" ]
+                                , DatePicker.view model.orderDate orderPickerSettings model.orderDatePicker
+                                    |> Html.map ToOrderDatePicker
+                                ]
+                            , div []
+                                [ h4 [] [ text "Delivery Date" ]
+                                , DatePicker.view model.deliveryDate deliveryPickerSettings model.deliveryDatePicker
+                                    |> Html.map ToDeliveryDatePicker
+                                ]
+                            ]
                          ]
                             |> pushIf (List.length model.orders > 0)
                                 (orderTable model <| OrderTableContent model.orders)
@@ -336,6 +464,7 @@ main =
 
 type alias InvoiceListItem =
     { id : String
+    , customerId : String
     , customerName : String
     , date : String
     }
@@ -345,6 +474,7 @@ invoiceListItemDecoder : Decoder InvoiceListItem
 invoiceListItemDecoder =
     Decode.succeed InvoiceListItem
         |> D.required "invoice_id" Decode.string
+        |> D.required "customer_id" Decode.string
         |> D.required "customer_name" Decode.string
         |> D.required "date" Decode.string
 

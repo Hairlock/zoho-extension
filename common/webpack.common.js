@@ -25,8 +25,8 @@ module.exports = {
             options: {
               cwd: __dirname,
               debug: true,
-              verbose: true,
-              pathToElm: '../bin/elm'
+              verbose: true
+              // pathToElm: '../bin/elm'
             }
           }
         ]
