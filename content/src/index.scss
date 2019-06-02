@@ -14,7 +14,8 @@ html {
 }
 
 .product {
-  margin-top: 45vh !important;
+  margin-top: 45vh;
+  transition: margin 750ms;
 }
 
 .content {

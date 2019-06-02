@@ -1,11 +1,11 @@
 const Elm = require('./Main.elm')
 
 let currState = {
-  clicks: 0
+  clicks: 0,
+  toggled: true
 };
 
 const app = Elm.Elm.Main.init({ flags: currState });
-
 
 // the currently connected ports
 const listeners = new Set()
@@ -40,3 +40,13 @@ chrome.runtime.onMessage.addListener((request, sender) => {
     app.ports.clicked.send(null)
   }
 })
+
+chrome.browserAction.onClicked.addListener((tab) => {
+  currState.toggled = !currState.toggled;
+  let iconPath = currState.toggled
+    ? 'z-blue.png'
+    : 'z-black.png';
+  chrome.browserAction.setIcon({ path: iconPath })
+
+  broadcast(currState);
+});

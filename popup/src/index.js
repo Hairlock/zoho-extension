@@ -8,12 +8,12 @@ let app
 const port = chrome.runtime.connect({ name: 'broadcast' })
 
 port.onMessage.addListener(state => {
-  
+
   // mount app on first broadcast  
   if (!app) {
     console.log(state);
     app = Elm.Elm.Main.init({
-      node : mountNode,
+      node: mountNode,
       flags: state
     });
     return
@@ -24,3 +24,4 @@ port.onMessage.addListener(state => {
 document.addEventListener('click', () => {
   chrome.runtime.sendMessage({ kind: 'clicked' })
 })
+

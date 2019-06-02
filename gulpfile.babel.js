@@ -34,12 +34,17 @@ gulp.task('copy-manifest', ['clean'], () => {
   return gulp.src('manifest.json').pipe(gulp.dest('./dist'))
 })
 
+gulp.task('copy-icons', ['clean'], () => {
+  return gulp.src('icons/**/*').pipe(gulp.dest('./dist'))
+})
+
 gulp.task('clean', cb => {
   rimraf('./dist', cb)
 })
 
 gulp.task('build', [
   'copy-manifest',
+  'copy-icons',
   'popup-js',
   'popup-html',
   'background-js',

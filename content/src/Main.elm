@@ -3,7 +3,7 @@ port module Main exposing (Msg(..), init, main, subscriptions, update, view)
 import Browser
 import Debug
 import Html exposing (Html, button, div, h1, h2, h3, h4, i, input, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, colspan, placeholder, value)
+import Html.Attributes exposing (class, colspan, id, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http as Http
 import Json.Decode as Decode exposing (Decoder)
@@ -176,6 +176,7 @@ view : Model -> Html Msg
 view model =
     div
         [ class "content"
+        , id "zoho-helper"
         ]
         [ div [ class "header" ]
             [ div [] [ h3 [] [ text "Zoho Helper" ] ]

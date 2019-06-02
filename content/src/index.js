@@ -27,10 +27,17 @@ port.onMessage.addListener(state => {
     });
     return
   }
-  app.ports.onState.send(state)
 
+  document.getElementsByClassName('product')[0].style.marginTop
+    = state.toggled
+      ? '45vh'
+      : '0';
+
+  document.getElementById('zoho-helper').style.display
+    = state.toggled
+      ? 'block'
+      : 'none';
 });
-
 
 function getCookie(name) {
   var value = "; " + document.cookie;
