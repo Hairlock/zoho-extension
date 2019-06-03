@@ -10,6 +10,7 @@ import Html.Events exposing (onClick, onInput)
 import Http as Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Pipeline as D exposing (hardcoded, optional, required)
+import Json.Encode as Encode exposing (Value)
 import RemoteData as RemoteData exposing (..)
 import Select
 import Simple.Fuzzy
@@ -25,6 +26,9 @@ port details : (Decode.Value -> msg) -> Sub msg
 
 
 port fetchInvoiceDetails : List String -> Cmd msg
+
+
+port navigateToSaleOrder : String -> Cmd msg
 
 
 
@@ -60,31 +64,6 @@ type alias Order =
     { product : Product
     , quantity : Float
     , itemorder : Int
-    }
-
-
-type alias SaleCustomField =
-    { label : String
-    , value : String
-    }
-
-
-type alias SaleLineItem =
-    { itemOrder : Int
-    , itemId : String
-    , rate : Float
-    , name : String
-    , quantity : Float
-    , discount : Float
-    , taxId : String
-    , unit : String
-    , customFields : List SaleCustomField
-    }
-
-
-type alias SalesOrder =
-    { customerid : String
-    , customerName : String
     }
 
 
@@ -146,9 +125,9 @@ init token =
       , products = Loading
       , contacts = Loading
       , restaurant = NotAsked
-      , contactSelect = Select.newState ""
-      , selectedContact = []
-      , productSelect = Select.newState ""
+      , contactSelect = Select.newState "contact-select"
+      , selectedContact = [ SearchContact "28416000000895384" "Leroy" ]
+      , productSelect = Select.newState "product-select"
       , orderDate = Nothing
       , orderDatePicker = orderPicker
       , deliveryDate = Nothing
@@ -157,6 +136,7 @@ init token =
     , Cmd.batch
         [ fetchProducts token
         , fetchContacts token
+        , fetchContactDetails token "28416000000895384"
         , Cmd.map ToOrderDatePicker orderPickerCmd
         , Cmd.map ToDeliveryDatePicker orderPickerCmd
         ]
@@ -177,6 +157,9 @@ type Msg
     | AddOrder String Float
     | RemoveOrder String
     | UpdateOrder Int OrderSelector String
+    | FetchSalesOrderTemplate
+    | SOTemplateFetched (WebData SalesOrderTemplate)
+    | SalesOrderCreated (WebData SalesOrder)
     | OnContactSelect (Maybe SearchContact)
     | ContactSelectMsg (Select.Msg SearchContact)
     | OnProductSelect (Maybe Product)
@@ -270,6 +253,38 @@ update msg model =
 
         RemoveOrder name ->
             ( { model | orders = List.filter (\o -> o.product.name /= name) model.orders }, Cmd.none )
+
+        FetchSalesOrderTemplate ->
+            ( model, fetchSalesOrderTemplate model.token )
+
+        SOTemplateFetched t ->
+            let
+                createCmd =
+                    case ( model.restaurant, t, ( model.orderDate, model.deliveryDate ) ) of
+                        ( Success restaurant, Success template, ( Just orderDate, Just deliveryDate ) ) ->
+                            createDraftSalesOrder
+                                model.token
+                                restaurant
+                                template
+                                ( orderDate, deliveryDate )
+                                model.orders
+
+                        _ ->
+                            Cmd.none
+            in
+            ( model, createCmd )
+
+        SalesOrderCreated data ->
+            let
+                orderCmd =
+                    case data of
+                        Success salesOrder ->
+                            navigateToSaleOrder salesOrder.id
+
+                        _ ->
+                            Cmd.none
+            in
+            ( model, orderCmd )
 
         UpdateOrder itemorder type_ val ->
             let
@@ -415,6 +430,8 @@ view model =
                                         ]
                                     ]
                                 , orderTable model <| OrderTableContent model.orders
+                                , div [ class "submit-order" ]
+                                    [ button [ onClick FetchSalesOrderTemplate ] [ text "Create Draft" ] ]
                                 ]
                             ]
 
@@ -451,8 +468,15 @@ loadingHtml =
 
 invoiceItem : InvoiceDetail -> Html Msg
 invoiceItem { lineitems, total, date } =
+    let
+        parsedDate =
+            Date.fromIsoString date
+                |> Result.toMaybe
+                |> Maybe.map (\d -> Date.format "EEEE, d-MM-YY" d)
+                |> Maybe.withDefault date
+    in
     div []
-        [ h4 [] [ text <| "Invoice Date - " ++ date ]
+        [ h4 [] [ text <| "Invoice Date - " ++ parsedDate ]
         , invoiceTable (InvoiceTableContent total lineitems)
         ]
 
@@ -504,7 +528,7 @@ orderTable : Model -> OrderTable -> Html Msg
 orderTable model (OrderTableContent orders) =
     let
         total =
-            List.foldl (\o acc -> o.product.price + acc) 0 orders
+            List.foldl (\o acc -> (o.product.price * o.quantity) + acc) 0 orders
 
         lineItemRow { name, quantity, price, unit, itemorder } =
             tr [ class "line-item" ]
@@ -760,20 +784,146 @@ type alias Restaurant =
     , name : String
     , billingId : String
     , shippingId : String
-    , deliveryMethods : List DeliveryMethod
     , invoices : List InvoiceListItem
     }
 
 
 restaurantDecoder : Decoder Restaurant
 restaurantDecoder =
-    Decode.map6 Restaurant
+    Decode.map5 Restaurant
         (Decode.at [ "contact", "contact_id" ] Decode.string)
         (Decode.at [ "contact", "name" ] Decode.string)
         (Decode.at [ "contact", "billing_address", "address_id" ] Decode.string)
         (Decode.at [ "contact", "shipping_address", "address_id" ] Decode.string)
-        (Decode.at [ "delivery_methods" ] (Decode.list deliveryMethodDecoder))
         (Decode.at [ "invoices" ] (Decode.list invoiceListItemDecoder))
+
+
+
+-- Sales Order Template
+
+
+type alias SalesOrderTemplate =
+    { templateId : String
+    , nextNumber : String
+    , prefixString : String
+    , deliveryMethods : List DeliveryMethod
+    }
+
+
+salesOrderTemplateDecoder : Decoder SalesOrderTemplate
+salesOrderTemplateDecoder =
+    Decode.map4 SalesOrderTemplate
+        (Decode.at [ "salesorder_settings", "default_template_id" ] Decode.string)
+        (Decode.at [ "salesorder_settings", "next_number" ] Decode.string)
+        (Decode.at [ "salesorder_settings", "prefix_string" ] Decode.string)
+        (Decode.field "delivery_methods" (Decode.list deliveryMethodDecoder))
+
+
+salesOrderCustomFieldEncoder : SalesOrderCustomField -> Encode.Value
+salesOrderCustomFieldEncoder { label, value } =
+    Encode.object
+        [ ( "label", Encode.string label )
+        , ( "value", Encode.string value )
+        ]
+
+
+saleOrderLineItemEncoder : Order -> Encode.Value
+saleOrderLineItemEncoder { product, quantity, itemorder } =
+    let
+        ( noOfFish, port_ ) =
+            ( SalesOrderCustomField "Port" "Poole"
+            , SalesOrderCustomField "Number of Fish" "3"
+            )
+    in
+    Encode.object
+        [ ( "item_id", Encode.string product.id )
+        , ( "item_order", Encode.string <| String.fromInt itemorder )
+        , ( "rate", Encode.float product.price )
+        , ( "name", Encode.string product.name )
+        , ( "description", Encode.string "" )
+        , ( "quantity", Encode.float quantity )
+        , ( "discount", Encode.float 0 )
+        , ( "tax_id", Encode.string "28416000000039007" )
+        , ( "unit", Encode.string product.unit )
+        , ( "tags", Encode.list Encode.string [] )
+        , ( "item_custom_fields", Encode.list salesOrderCustomFieldEncoder [ noOfFish, port_ ] )
+        ]
+
+
+salesOrderEncoder :
+    Restaurant
+    -> SalesOrderTemplate
+    -> ( Date, Date )
+    -> List Order
+    -> Encode.Value
+salesOrderEncoder restaurant soTemplate dates orders =
+    let
+        { id, name, billingId, shippingId, invoices } =
+            restaurant
+
+        { templateId, nextNumber, prefixString, deliveryMethods } =
+            soTemplate
+
+        ( orderDate, shipmentDate ) =
+            ( Tuple.first dates, Tuple.second dates )
+
+        deliveryMethod =
+            deliveryMethods
+                |> List.head
+                |> Maybe.map .method
+                |> Maybe.withDefault "Same Day"
+    in
+    Encode.object
+        [ ( "customer_id", Encode.string id )
+        , ( "salesorder_number", Encode.string <| prefixString ++ nextNumber )
+        , ( "date", Encode.string <| Date.format "YYYY-MM-dd" orderDate )
+        , ( "shipment_date", Encode.string <| Date.format "YYYY-MM-dd" shipmentDate )
+        , ( "exchange_rate", Encode.int 1 )
+        , ( "delivery_method"
+          , Encode.string deliveryMethod
+          )
+        , ( "line_items", Encode.list saleOrderLineItemEncoder orders )
+        , ( "discount", Encode.int 0 )
+        , ( "vat_treatment", Encode.string "uk" )
+        , ( "template_id", Encode.string templateId )
+        , ( "shipping_address_id", Encode.string shippingId )
+        , ( "billing_address_id", Encode.string billingId )
+        , ( "order_status", Encode.string "draft" )
+        ]
+
+
+
+-- SalesOrder
+
+
+type alias SalesOrderCustomField =
+    { label : String
+    , value : String
+    }
+
+
+type alias SalesOrderLineItem =
+    { itemOrder : Int
+    , itemId : String
+    , rate : Float
+    , name : String
+    , quantity : Float
+    , discount : Float
+    , taxId : String
+    , unit : String
+    , customFields : List SalesOrderCustomField
+    }
+
+
+type alias SalesOrder =
+    { id : String
+    }
+
+
+salesOrderDecoder : Decoder SalesOrder
+salesOrderDecoder =
+    Decode.map SalesOrder
+        (Decode.at [ "salesorder", "salesorder_id" ] Decode.string)
 
 
 
@@ -783,6 +933,34 @@ restaurantDecoder =
 apiUrl : String -> String
 apiUrl endpoint =
     "https://inventory.zoho.eu/api/v1/" ++ endpoint ++ "?organization_id=20062851724"
+
+
+createDraftSalesOrder :
+    String
+    -> Restaurant
+    -> SalesOrderTemplate
+    -> ( Date, Date )
+    -> List Order
+    -> Cmd Msg
+createDraftSalesOrder token restaurant template dates orders =
+    let
+        body =
+            Http.multipartBody
+                [ Http.stringPart "JSONString" <|
+                    Encode.encode 0 <|
+                        salesOrderEncoder restaurant template dates orders
+                ]
+    in
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "X-ZCSRF-TOKEN" token ]
+        , url =
+            apiUrl "salesorders"
+        , body = body
+        , expect = Http.expectJson (RemoteData.fromResult >> SalesOrderCreated) salesOrderDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 getInvoicesForCompany : String -> String -> Cmd Msg
@@ -844,6 +1022,21 @@ fetchContactDetails token id =
                 ++ "&disabled_settings=true"
         , body = Http.emptyBody
         , expect = Http.expectJson (RemoteData.fromResult >> RestaurantLoaded) restaurantDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+fetchSalesOrderTemplate : String -> Cmd Msg
+fetchSalesOrderTemplate token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "X-ZCSRF-TOKEN" token ]
+        , url =
+            apiUrl "salesorders/editpage/"
+                ++ "&is_pre_tax=false"
+        , body = Http.emptyBody
+        , expect = Http.expectJson (RemoteData.fromResult >> SOTemplateFetched) salesOrderTemplateDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

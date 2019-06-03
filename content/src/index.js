@@ -18,13 +18,19 @@ port.onMessage.addListener(state => {
     app = Elm.Elm.Main.init({
       node: mountNode,
       flags: authToken
-    })
+    });
+
     app.ports.fetchInvoiceDetails.subscribe((ids) => {
       getInvoiceDetails(ids)
         .then((data) => {
           app.ports.details.send({ invoices: data.map(i => i.invoice) })
         });
     });
+
+    app.ports.navigateToSaleOrder.subscribe((id) => {
+      document.location.href = `/app#/salesorders/${id}/edit`;
+    });
+
     return
   }
 
