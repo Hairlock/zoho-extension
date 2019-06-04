@@ -23,9 +23,14 @@ html {
 	flex-direction: column;
 	justify-content: center;
 	text-align: center;
+	height: 100%;
 
 	> .--loading, .--error {	
 		height: 40vh;
+
+		svg {
+			margin-left: 0.5em;
+		}
 
 		i {
 			margin-left: 0.5em;
@@ -42,7 +47,7 @@ html {
 	position: absolute;
 	top: 0;
 	width: 100%;
-	height: 100%;
+	height: 46vh;
 	z-index: 0;
 
 	h1, h2, h3, h4 {
@@ -79,6 +84,10 @@ html {
 				align-items: center;
 				padding: 10px;
 				min-width: 500px;
+			}
+
+			> .--no-invoices {
+				width: 100%;
 			}
 		}
 

@@ -1,7 +1,7 @@
 port module Main exposing (Msg(..), init, main, subscriptions, update, view)
 
 import Browser
-import Date exposing (Date)
+import Date exposing (Date, Unit(..))
 import DatePicker exposing (DateEvent(..), defaultSettings)
 import Debug
 import Html exposing (Html, button, div, h1, h2, h3, h4, i, input, span, table, tbody, td, text, th, thead, tr)
@@ -14,6 +14,7 @@ import Json.Encode as Encode exposing (Value)
 import RemoteData as RemoteData exposing (..)
 import Select
 import Simple.Fuzzy
+import Task exposing (Task)
 import Time exposing (Weekday(..))
 
 
@@ -37,13 +38,13 @@ port navigateToSaleOrder : String -> Cmd msg
 
 type alias Model =
     { token : String
-    , searchTerm : String
     , invoices : WebData InvoiceListResponse
     , invoiceDetails : Maybe (List InvoiceDetail)
     , orders : List Order
     , products : WebData ProductListResponse
     , contacts : WebData SearchContacts
     , restaurant : WebData Restaurant
+    , salesOrder : WebData SalesOrder
     , contactSelect : Select.State
     , productSelect : Select.State
     , selectedContact : List SearchContact
@@ -116,29 +117,35 @@ init token =
     let
         ( orderPicker, orderPickerCmd ) =
             DatePicker.init
+
+        ( deliveryPicker, deliveryPickerCmd ) =
+            DatePicker.init
+
+        dateTask =
+            Date.today
+                |> Task.attempt InitializeDatePickers
     in
     ( { token = token
-      , searchTerm = "Leroy"
       , invoices = NotAsked
       , invoiceDetails = Nothing
       , orders = []
       , products = Loading
       , contacts = Loading
       , restaurant = NotAsked
+      , salesOrder = NotAsked
       , contactSelect = Select.newState "contact-select"
-      , selectedContact = [ SearchContact "28416000000895384" "Leroy" ]
+      , selectedContact = [ SearchContact "" "" ]
       , productSelect = Select.newState "product-select"
       , orderDate = Nothing
       , orderDatePicker = orderPicker
       , deliveryDate = Nothing
-      , deliveryDatePicker = orderPicker
+      , deliveryDatePicker = deliveryPicker
       }
     , Cmd.batch
         [ fetchProducts token
         , fetchContacts token
-        , fetchContactDetails token "28416000000895384"
         , Cmd.map ToOrderDatePicker orderPickerCmd
-        , Cmd.map ToDeliveryDatePicker orderPickerCmd
+        , Cmd.map ToDeliveryDatePicker deliveryPickerCmd
         ]
     )
 
@@ -148,8 +155,7 @@ init token =
 
 
 type Msg
-    = SearchInputChanged String
-    | InvoicesLoaded (WebData InvoiceListResponse)
+    = InvoicesLoaded (WebData InvoiceListResponse)
     | InvoiceDetailsReceived (Result Decode.Error (List InvoiceDetail))
     | ProductsLoaded (WebData ProductListResponse)
     | ContactsLoaded (WebData SearchContacts)
@@ -164,6 +170,7 @@ type Msg
     | ContactSelectMsg (Select.Msg SearchContact)
     | OnProductSelect (Maybe Product)
     | ProductSelectMsg (Select.Msg Product)
+    | InitializeDatePickers (Result Never Date)
     | ToOrderDatePicker DatePicker.Msg
     | ToDeliveryDatePicker DatePicker.Msg
 
@@ -175,9 +182,6 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        SearchInputChanged new ->
-            ( { model | searchTerm = new }, Cmd.none )
-
         InvoicesLoaded invoices ->
             let
                 fetchCmd =
@@ -255,7 +259,7 @@ update msg model =
             ( { model | orders = List.filter (\o -> o.product.name /= name) model.orders }, Cmd.none )
 
         FetchSalesOrderTemplate ->
-            ( model, fetchSalesOrderTemplate model.token )
+            ( { model | salesOrder = Loading }, fetchSalesOrderTemplate model.token )
 
         SOTemplateFetched t ->
             let
@@ -284,7 +288,14 @@ update msg model =
                         _ ->
                             Cmd.none
             in
-            ( model, orderCmd )
+            ( { model
+                | salesOrder = NotAsked
+                , orderDate = Nothing
+                , deliveryDate = Nothing
+                , orders = []
+              }
+            , orderCmd
+            )
 
         UpdateOrder itemorder type_ val ->
             let
@@ -318,6 +329,7 @@ update msg model =
             ( { model
                 | selectedContact = [ contact ]
                 , restaurant = Loading
+                , orders = []
               }
             , selectContactCmd
             )
@@ -340,6 +352,23 @@ update msg model =
                             model.orders
             in
             ( { model | orders = selectedProducts }, Cmd.none )
+
+        InitializeDatePickers (Ok today) ->
+            let
+                ( orderPicker, orderPickerCmd ) =
+                    DatePicker.init
+
+                deliveryPicker =
+                    DatePicker.initFromDate <| Date.add Weeks 1 today
+            in
+            ( { model
+                | orderDate = Just today
+              }
+            , Cmd.none
+            )
+
+        InitializeDatePickers _ ->
+            ( model, Cmd.none )
 
         ToOrderDatePicker subMsg ->
             let
@@ -384,12 +413,12 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    case ( model.contacts, model.products ) of
-        ( Success contacts, Success products ) ->
-            div
-                [ class "content"
-                , id "zoho-helper"
-                ]
+    div
+        [ class "content"
+        , id "zoho-helper"
+        ]
+        (case ( model.contacts, model.products ) of
+            ( Success contacts, Success products ) ->
                 [ div [ class "header" ]
                     [ div [] [ h3 [] [ text "Zoho Helper" ] ]
                     , div [ class "search-controls" ]
@@ -401,67 +430,108 @@ view model =
                             |> Html.map ContactSelectMsg
                         ]
                     ]
-                , case ( model.invoiceDetails, model.restaurant ) of
-                    ( Just invoiceDetails, Success restaurant ) ->
+                , case model.restaurant of
+                    Success restaurant ->
                         div [ class "main" ]
                             [ div [ class "invoice-wrapper" ]
-                                (if List.isEmpty invoiceDetails then
-                                    [ div [ class "centered-header --no-invoices" ]
-                                        [ h2 [ class "no-results" ]
-                                            [ text "No Prior Invoices" ]
-                                        ]
-                                    ]
+                                (case model.invoiceDetails of
+                                    Just invoiceDetails ->
+                                        if List.isEmpty invoiceDetails then
+                                            [ noInvoicesHtml
+                                            ]
 
-                                 else
-                                    List.map invoiceItem invoiceDetails
+                                        else
+                                            List.map invoiceItem invoiceDetails
+
+                                    _ ->
+                                        [ noInvoicesHtml ]
                                 )
                             , div [ class "order-builder" ]
-                                [ h3 [] [ text <| "Order Builder - " ++ restaurant.name ]
-                                , div [ class "date-pickers" ]
-                                    [ div []
-                                        [ h4 [] [ text "Order Date" ]
-                                        , DatePicker.view model.orderDate orderPickerSettings model.orderDatePicker
-                                            |> Html.map ToOrderDatePicker
-                                        ]
-                                    , div []
-                                        [ h4 [] [ text "Delivery Date" ]
-                                        , DatePicker.view model.deliveryDate deliveryPickerSettings model.deliveryDatePicker
-                                            |> Html.map ToDeliveryDatePicker
-                                        ]
-                                    ]
-                                , orderTable model <| OrderTableContent model.orders
-                                , div [ class "submit-order" ]
-                                    [ button [ onClick FetchSalesOrderTemplate ] [ text "Create Draft" ] ]
-                                ]
+                                (orderBuilder restaurant model)
                             ]
 
-                    ( _, Loading ) ->
-                        loadingHtml
+                    Loading ->
+                        loadingHtml "Restaurant"
 
                     _ ->
                         div [ class "centered-header" ] []
                 ]
 
-        ( Loading, Loading ) ->
-            loadingHtml
+            ( Loading, Loading ) ->
+                [ loadingHtml "Contacts and Products" ]
 
-        ( Loading, Success _ ) ->
-            loadingHtml
+            ( Loading, Success _ ) ->
+                [ loadingHtml "" ]
 
-        ( Success _, Loading ) ->
-            loadingHtml
+            ( Success _, Loading ) ->
+                [ loadingHtml "" ]
+
+            _ ->
+                [ div [ class "centered-header --error" ]
+                    [ h1 [] [ text "There was an error :{" ] ]
+                ]
+        )
+
+
+orderBuilder : Restaurant -> Model -> List (Html Msg)
+orderBuilder restaurant model =
+    case model.salesOrder of
+        NotAsked ->
+            [ h3 [] [ text <| "Order Builder - " ++ restaurant.name ]
+            , div [ class "date-pickers" ]
+                [ div []
+                    [ h4 [] [ text "Order Date" ]
+                    , DatePicker.view model.orderDate orderPickerSettings model.orderDatePicker
+                        |> Html.map ToOrderDatePicker
+                    ]
+                , div []
+                    [ h4 [] [ text "Delivery Date" ]
+                    , DatePicker.view model.deliveryDate deliveryPickerSettings model.deliveryDatePicker
+                        |> Html.map ToDeliveryDatePicker
+                    ]
+                ]
+            , orderTable model <| OrderTableContent model.orders
+            , div [ class "submit-order" ]
+                [ case ( model.orderDate, model.deliveryDate, List.length model.orders > 0 ) of
+                    ( Just _, Just _, True ) ->
+                        button [ onClick FetchSalesOrderTemplate ] [ text "Create Draft" ]
+
+                    _ ->
+                        div [] []
+                ]
+            ]
+
+        Loading ->
+            [ loadingHtml "New Order Draft" ]
 
         _ ->
-            div [ class "centered-header --error" ]
-                [ h1 [] [ text "There was an error :{" ] ]
+            [ errorHtml "There was an error, refresh the page" ]
 
 
-loadingHtml : Html Msg
-loadingHtml =
+noInvoicesHtml : Html Msg
+noInvoicesHtml =
+    div [ class "centered-header --no-invoices" ]
+        [ h2 [ class "no-results" ]
+            [ text "No Prior Invoices" ]
+        ]
+
+
+loadingHtml : String -> Html Msg
+loadingHtml message =
     div [ class "centered-header --loading" ]
         [ h1 []
-            [ text "Loading"
+            [ text <| "Loading - " ++ message
             , i [ class "far fa-hourglass" ] []
+            ]
+        ]
+
+
+errorHtml : String -> Html Msg
+errorHtml message =
+    div [ class "centered-header --loading" ]
+        [ h1 []
+            [ text <| "Loading " ++ message
+            , i [ class "far fa-times" ] []
             ]
         ]
 
@@ -831,14 +901,15 @@ saleOrderLineItemEncoder : Order -> Encode.Value
 saleOrderLineItemEncoder { product, quantity, itemorder } =
     let
         ( noOfFish, port_ ) =
-            ( SalesOrderCustomField "Port" "Poole"
-            , SalesOrderCustomField "Number of Fish" "3"
+            ( SalesOrderCustomField "Port" "Plymouth"
+            , SalesOrderCustomField "Number of Fish" "1"
             )
     in
     Encode.object
         [ ( "item_id", Encode.string product.id )
         , ( "item_order", Encode.string <| String.fromInt itemorder )
-        , ( "rate", Encode.float product.price )
+
+        -- , ( "rate", Encode.float product.price )
         , ( "name", Encode.string product.name )
         , ( "description", Encode.string "" )
         , ( "quantity", Encode.float quantity )
@@ -846,7 +917,7 @@ saleOrderLineItemEncoder { product, quantity, itemorder } =
         , ( "tax_id", Encode.string "28416000000039007" )
         , ( "unit", Encode.string product.unit )
         , ( "tags", Encode.list Encode.string [] )
-        , ( "item_custom_fields", Encode.list salesOrderCustomFieldEncoder [ noOfFish, port_ ] )
+        , ( "item_custom_fields", Encode.list salesOrderCustomFieldEncoder [ port_ ] )
         ]
 
 
@@ -1088,33 +1159,6 @@ updateAt index fn list =
 
 
 
--- Order Selector
--- type SelectorMsg
---     = Toggle SelectorMode
---     | UpdateValue String
--- type SelectorMode
---     = Edit
---     | Display
--- type alias OrderSelector =
---     { value : Maybe Float
---     , mode : SelectorMode
---     }
--- selectorUpdate : OrderSelector -> SelectorMsg -> ( OrderSelector, Cmd SelectorMsg )
--- selectorUpdate model msg =
---     case msg of
---         Toggle mode ->
---             ( { model | mode = mode }, Cmd.none )
---         UpdateValue val ->
---             ( { model | value = String.toFloat val }, Cmd.none )
--- selectorView : OrderSelector -> Html SelectorMsg
--- selectorView { value, mode } =
---     div []
---         [ case mode of
---             Display ->
---                 text <| String.fromFloat <| Maybe.withDefault 0 <| value
---             Edit ->
---                 input [ type_ "number", step "0.01", onInput UpdateValue ] []
---         ]
 -- Convenience Functions
 
 
