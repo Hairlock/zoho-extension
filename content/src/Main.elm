@@ -1,12 +1,12 @@
 port module Main exposing (Msg(..), init, main, subscriptions, update, view)
 
 import Browser
-import Date exposing (Date, Unit(..))
+import Date exposing (..)
 import DatePicker exposing (DateEvent(..), defaultSettings)
 import Debug
-import Html exposing (Html, button, div, h1, h2, h3, h4, i, input, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, colspan, id, placeholder, step, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Html exposing (Html, button, div, form, h1, h2, h3, h4, i, input, label, span, table, tbody, td, text, th, thead, tr)
+import Html.Attributes exposing (checked, class, colspan, id, placeholder, selected, step, type_, value)
+import Html.Events exposing (onCheck, onClick, onInput)
 import Http as Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Pipeline as D exposing (hardcoded, optional, required)
@@ -14,13 +14,12 @@ import Json.Encode as Encode exposing (Value)
 import RemoteData as RemoteData exposing (..)
 import Select
 import Simple.Fuzzy
-import Task exposing (Task)
+import Task exposing (Task, perform, succeed)
 import Time exposing (Weekday(..))
 
 
 
--- PORTS FROM JAVASCRIPT
--- port onState : (Model -> msg) -> Sub msg
+-- PORTS
 
 
 port details : (Decode.Value -> msg) -> Sub msg
@@ -49,6 +48,8 @@ type alias Model =
     , productSelect : Select.State
     , selectedContact : List SearchContact
     , orderDate : Maybe Date
+    , orderFrequency : OrderFrequency
+    , orderQueue : List QueuedOrder
     , orderDatePicker : DatePicker.DatePicker
     , deliveryDate : Maybe Date
     , deliveryDatePicker : DatePicker.DatePicker
@@ -66,6 +67,10 @@ type alias Order =
     , quantity : Float
     , itemorder : Int
     }
+
+
+type alias QueuedOrder =
+    { orderFreq : OrderFrequency }
 
 
 
@@ -134,9 +139,11 @@ init token =
       , restaurant = NotAsked
       , salesOrder = NotAsked
       , contactSelect = Select.newState "contact-select"
-      , selectedContact = [ SearchContact "" "" ]
+      , selectedContact = [ SearchContact "28416000001299082" "R1" ]
       , productSelect = Select.newState "product-select"
       , orderDate = Nothing
+      , orderFrequency = OneOff
+      , orderQueue = []
       , orderDatePicker = orderPicker
       , deliveryDate = Nothing
       , deliveryDatePicker = deliveryPicker
@@ -144,6 +151,7 @@ init token =
     , Cmd.batch
         [ fetchProducts token
         , fetchContacts token
+        , fetchContactDetails token "28416000001299082"
         , Cmd.map ToOrderDatePicker orderPickerCmd
         , Cmd.map ToDeliveryDatePicker deliveryPickerCmd
         ]
@@ -163,8 +171,9 @@ type Msg
     | AddOrder String Float
     | RemoveOrder String
     | UpdateOrder Int OrderSelector String
-    | FetchSalesOrderTemplate
-    | SOTemplateFetched (WebData SalesOrderTemplate)
+    | CreateSalesOrder
+    | FetchSalesOrderTemplate OrderDates
+    | SOTemplateFetched OrderDates (WebData SalesOrderTemplate)
     | SalesOrderCreated (WebData SalesOrder)
     | OnContactSelect (Maybe SearchContact)
     | ContactSelectMsg (Select.Msg SearchContact)
@@ -173,6 +182,17 @@ type Msg
     | InitializeDatePickers (Result Never Date)
     | ToOrderDatePicker DatePicker.Msg
     | ToDeliveryDatePicker DatePicker.Msg
+    | SetOrderFrequency OrderFrequency
+
+
+type OrderFrequency
+    = OneOff
+    | Daily
+    | Weekly
+
+
+type alias OrderDates =
+    ( Date, Date )
 
 
 
@@ -201,6 +221,26 @@ update msg model =
                 | invoices = invoices
               }
             , fetchCmd
+            )
+
+        SetOrderFrequency freq ->
+            let
+                queuedOrders =
+                    case freq of
+                        OneOff ->
+                            []
+
+                        Daily ->
+                            List.repeat 20 <| QueuedOrder Daily
+
+                        Weekly ->
+                            List.repeat 2 <| QueuedOrder Weekly
+            in
+            ( { model
+                | orderFrequency = freq
+                , orderQueue = queuedOrders
+              }
+            , Cmd.none
             )
 
         InvoiceDetailsReceived results ->
@@ -258,14 +298,76 @@ update msg model =
         RemoveOrder name ->
             ( { model | orders = List.filter (\o -> o.product.name /= name) model.orders }, Cmd.none )
 
-        FetchSalesOrderTemplate ->
-            ( { model | salesOrder = Loading }, fetchSalesOrderTemplate model.token )
-
-        SOTemplateFetched t ->
+        CreateSalesOrder ->
             let
                 createCmd =
-                    case ( model.restaurant, t, ( model.orderDate, model.deliveryDate ) ) of
-                        ( Success restaurant, Success template, ( Just orderDate, Just deliveryDate ) ) ->
+                    let
+                        filterWeekend =
+                            List.filter
+                                (\d ->
+                                    Date.weekday d
+                                        /= Sat
+                                        && Date.weekday d
+                                        /= Sun
+                                )
+
+                        dateRange orderFreq startDate =
+                            case orderFreq of
+                                Daily ->
+                                    Date.range Day 1 startDate (startDate |> Date.add Months 1)
+                                        |> filterWeekend
+
+                                Weekly ->
+                                    Date.range Day 14 startDate (startDate |> Date.add Months 1)
+
+                                _ ->
+                                    []
+
+                        orderCmd orderFreq orderDate startDate =
+                            let
+                                _ =
+                                    Debug.log "deliveryDate" (Date.toIsoString startDate)
+                            in
+                            
+                            Cmd.batch <|
+                                List.map
+                                    (\date ->
+                                        let
+                                            _ =
+                                                Debug.log "date" (Date.toIsoString date)
+                                        in
+                                        
+                                        -- fireAction FetchSalesOrderTemplate ( orderDate, date )
+                                        Cmd.none
+                                    )
+                                <|
+                                    dateRange orderFreq startDate
+                    in
+                    case ( model.orderDate, model.deliveryDate ) of
+                        ( Just orderDate, Just deliveryDate ) ->
+                            case model.orderFrequency of
+                                OneOff ->
+                                    fireAction FetchSalesOrderTemplate ( orderDate, deliveryDate )
+
+                                Daily ->
+                                    orderCmd Daily orderDate deliveryDate
+
+                                Weekly ->
+                                    orderCmd Weekly orderDate deliveryDate                         
+
+                        ( _, _ ) ->
+                            Cmd.none
+            in
+            ( model, createCmd )
+
+        FetchSalesOrderTemplate dates ->
+            ( { model | salesOrder = Loading }, fetchSalesOrderTemplate model.token dates )
+
+        SOTemplateFetched ( orderDate, deliveryDate ) t ->
+            let
+                createCmd =
+                    case ( model.restaurant, t ) of
+                        ( Success restaurant, Success template ) ->
                             createDraftSalesOrder
                                 model.token
                                 restaurant
@@ -281,8 +383,8 @@ update msg model =
         SalesOrderCreated data ->
             let
                 orderCmd =
-                    case data of
-                        Success salesOrder ->
+                    case (data, model.orderFrequency) of
+                        (Success salesOrder, OneOff) ->
                             navigateToSaleOrder salesOrder.id
 
                         _ ->
@@ -475,6 +577,15 @@ view model =
 
 orderBuilder : Restaurant -> Model -> List (Html Msg)
 orderBuilder restaurant model =
+    let
+        radio : OrderFrequency -> String -> Html Msg
+        radio oFreq name =
+            label
+                [ class "order-radio" ]
+                [ input [ type_ "radio", onCheck (\_ -> SetOrderFrequency oFreq), checked (model.orderFrequency == oFreq) ] []
+                , text name
+                ]
+    in
     case model.salesOrder of
         NotAsked ->
             [ h3 [] [ text <| "Order Builder - " ++ restaurant.name ]
@@ -489,12 +600,19 @@ orderBuilder restaurant model =
                     , DatePicker.view model.deliveryDate deliveryPickerSettings model.deliveryDatePicker
                         |> Html.map ToDeliveryDatePicker
                     ]
+                , div []
+                    [ form [ class "order-frequencies"]
+                        [ radio OneOff "One Off"
+                        , radio Daily "Daily"
+                        , radio Weekly "Weekly"
+                        ]
+                    ]
                 ]
             , orderTable model <| OrderTableContent model.orders
             , div [ class "submit-order" ]
                 [ case ( model.orderDate, model.deliveryDate, List.length model.orders > 0 ) of
                     ( Just _, Just _, True ) ->
-                        button [ onClick FetchSalesOrderTemplate ] [ text "Create Draft" ]
+                        button [ onClick CreateSalesOrder ] [ text "Create Draft" ]
 
                     _ ->
                         div [] []
@@ -1098,8 +1216,8 @@ fetchContactDetails token id =
         }
 
 
-fetchSalesOrderTemplate : String -> Cmd Msg
-fetchSalesOrderTemplate token =
+fetchSalesOrderTemplate : String -> OrderDates -> Cmd Msg
+fetchSalesOrderTemplate token dates =
     Http.request
         { method = "GET"
         , headers = [ Http.header "X-ZCSRF-TOKEN" token ]
@@ -1107,7 +1225,7 @@ fetchSalesOrderTemplate token =
             apiUrl "salesorders/editpage/"
                 ++ "&is_pre_tax=false"
         , body = Http.emptyBody
-        , expect = Http.expectJson (RemoteData.fromResult >> SOTemplateFetched) salesOrderTemplateDecoder
+        , expect = Http.expectJson (RemoteData.fromResult >> SOTemplateFetched dates) salesOrderTemplateDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -1115,6 +1233,11 @@ fetchSalesOrderTemplate token =
 
 
 -- Util Functions
+
+
+fireAction : (a -> msg) -> a -> Cmd msg
+fireAction msgFn payload =
+    perform msgFn (succeed payload)
 
 
 filter : Int -> (a -> String) -> String -> List a -> Maybe (List a)
