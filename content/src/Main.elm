@@ -183,6 +183,8 @@ type Msg
     | ToOrderDatePicker DatePicker.Msg
     | ToDeliveryDatePicker DatePicker.Msg
     | SetOrderFrequency OrderFrequency
+    | AddingSomethingToTest
+    | SomethingElse
 
 
 type OrderFrequency
@@ -328,7 +330,7 @@ update msg model =
                                 _ =
                                     Debug.log "deliveryDate" (Date.toIsoString startDate)
                             in
-                            
+
                             Cmd.batch <|
                                 List.map
                                     (\date ->
@@ -336,7 +338,7 @@ update msg model =
                                             _ =
                                                 Debug.log "date" (Date.toIsoString date)
                                         in
-                                        
+
                                         -- fireAction FetchSalesOrderTemplate ( orderDate, date )
                                         Cmd.none
                                     )
@@ -353,7 +355,7 @@ update msg model =
                                     orderCmd Daily orderDate deliveryDate
 
                                 Weekly ->
-                                    orderCmd Weekly orderDate deliveryDate                         
+                                    orderCmd Weekly orderDate deliveryDate
 
                         ( _, _ ) ->
                             Cmd.none
